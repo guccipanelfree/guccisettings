@@ -1,0 +1,264 @@
+name: Settings APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.2'
+
+      - name: Scaffold project
+        run: |
+          mkdir -p app/src/main/java/com/example/shtile
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "Settings"
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.2.2' apply false
+              id 'org.jetbrains.kotlin.android' version '1.9.22' apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          org.gradle.jvmargs=-Xmx2048m
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.example.shtile'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.example.shtile"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes { release { minifyEnabled false } }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = '17' }
+          }
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:allowBackup="true"
+                  android:label="Settings"
+                  android:theme="@style/Theme.AppCompat.DayNight">
+
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".GucciTileService"
+                      android:exported="true"
+                      android:icon="@drawable/ic_tile"
+                      android:label="Gucci"
+                      android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+                      <intent-filter>
+                          <action android:name="android.service.quicksettings.action.QS_TILE"/>
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.service.quicksettings.ACTIVE_TILE"
+                          android:value="false"/>
+                  </service>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/example/shtile/GucciTileService.kt <<'EOF'
+          package com.example.shtile
+
+          import android.os.Handler
+          import android.os.Looper
+          import android.service.quicksettings.Tile
+          import android.service.quicksettings.TileService
+          import android.widget.Toast
+
+          class GucciTileService : TileService() {
+
+              override fun onStartListening() {
+                  super.onStartListening()
+                  qsTile?.apply {
+                      label = "Gucci"
+                      state = Tile.STATE_INACTIVE
+                      updateTile()
+                  }
+              }
+
+              override fun onClick() {
+                  super.onClick()
+                  qsTile?.state = Tile.STATE_ACTIVE
+                  qsTile?.updateTile()
+
+                  Thread {
+                      val code = runAsRoot()
+                      Handler(Looper.getMainLooper()).post {
+                          qsTile?.state = Tile.STATE_INACTIVE
+                          qsTile?.updateTile()
+                          toast(if (code == 0) "Gucci Done ✓" else "Gucci Exit $code")
+                      }
+                  }.start()
+              }
+
+              private fun runAsRoot(): Int {
+                  return try {
+                      // 2 (EXTERNAL mode), then 3 (rt-dev driver)
+                      val cmd = "cd /data/local/tmp && (echo 2; sleep 4; echo 3; sleep 2) | ./Gucci_brutal >/dev/null 2>&1"
+                      val p = ProcessBuilder("su", "-c", cmd)
+                          .redirectErrorStream(true).start()
+                      p.inputStream.close()
+                      p.waitFor()
+                  } catch (e: Exception) {
+                      -1
+                  }
+              }
+
+              private fun toast(msg: String) {
+                  Handler(Looper.getMainLooper()).post {
+                      Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/shtile/MainActivity.kt <<'EOF'
+          package com.example.shtile
+
+          import android.os.Bundle
+          import android.widget.Button
+          import android.widget.TextView
+          import androidx.appcompat.app.AppCompatActivity
+
+          class MainActivity : AppCompatActivity() {
+
+              private lateinit var status: TextView
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+
+                  status = findViewById(R.id.status)
+
+                  findViewById<Button>(R.id.testGucciBtn).setOnClickListener {
+                      runTestGucci()
+                  }
+
+                  status.text = "Ready to test."
+              }
+
+              private fun runTestGucci() {
+                  status.text = "Running Gucci on Gucci_brutal..."
+                  Thread {
+                      val out = try {
+                          val cmd = "cd /data/local/tmp && (echo 2; sleep 4; echo 3; sleep 2) | ./Gucci_brutal"
+                          val p = ProcessBuilder("su", "-c", cmd)
+                              .redirectErrorStream(true).start()
+                          val text = p.inputStream.bufferedReader().readText()
+                          val code = p.waitFor()
+                          "$text\nexit=$code"
+                      } catch (e: Exception) {
+                          "Error: ${e.message}"
+                      }
+                      runOnUiThread { status.text = "Gucci Result:\n\n$out" }
+                  }.start()
+              }
+
+              override fun onDestroy() {
+                  status.text = ""
+                  super.onDestroy()
+              }
+          }
+          EOF
+
+          cat > app/src/main/res/layout/activity_main.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:orientation="vertical"
+              android:padding="24dp"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent">
+
+              <Button android:id="@+id/testGucciBtn"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="Test Gucci (Gucci_brutal)"/>
+
+              <TextView android:id="@+id/status"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:paddingTop="16dp"
+                  android:typeface="monospace"
+                  android:textSize="12sp"/>
+          </LinearLayout>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_tile.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M4,4h16v16H4z M6,8l3,4l-3,4h2l3,-4l-3,-4z M12,15h6v2h-6z"/>
+          </vector>
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources><string name="app_name">Settings</string></resources>
+          EOF
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Settings-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
